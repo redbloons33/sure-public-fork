@@ -161,6 +161,8 @@ class Account::ProviderImportAdapter
       elsif detected_label == "Contribution"
         auto_kind = "investment_contribution"
         auto_category = account.family.investment_contributions_category
+      elsif looks_like_reinvestment?(name)
+        auto_kind = "funds_movement"
       elsif account.accountable_type == "Loan" && amount.negative? && looks_like_liability_payment?(name)
         auto_kind = "loan_payment"
       elsif account.accountable_type == "CreditCard" && amount.negative? && looks_like_liability_payment?(name)
@@ -908,6 +910,11 @@ class Account::ProviderImportAdapter
   def looks_like_liability_payment?(name)
     return false if name.blank?
     name.match?(/\b(payment|autopay)\b/i)
+  end
+
+  def looks_like_reinvestment?(name)
+    return false if name.blank?
+    name.match?(/\breinvest(ment|ed)?\b/i)
   end
 
   # Determines why an entry should be skipped during sync.

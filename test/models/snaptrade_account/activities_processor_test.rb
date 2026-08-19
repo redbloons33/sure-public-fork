@@ -90,9 +90,10 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
 
     transaction = entry.entryable
     assert_equal "Dividend", transaction.investment_activity_label
+    assert_operator entry.amount.to_f, :<, 0, "Dividend should be negative (inflow)"
   end
 
-  test "processes contribution with positive amount" do
+  test "processes contribution as inflow (negative amount)" do
     @snaptrade_account.update!(raw_activities_payload: [
       build_cash_activity(
         id: "contrib_001",
@@ -107,12 +108,12 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
 
     entry = @account.entries.find_by(external_id: "contrib_001", source: "snaptrade")
     assert_not_nil entry
-    # Amount is on entry, not transaction
-    assert_equal 500.00, entry.amount.to_f  # Positive for contributions
+    # Amount is on entry, not transaction — contributions are inflows (negative in Sure's convention)
+    assert_equal(-500.00, entry.amount.to_f)
     assert_equal "Contribution", entry.entryable.investment_activity_label
   end
 
-  test "processes withdrawal with negative amount" do
+  test "processes withdrawal as outflow (positive amount)" do
     @snaptrade_account.update!(raw_activities_payload: [
       build_cash_activity(
         id: "withdraw_001",
@@ -127,7 +128,7 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
 
     entry = @account.entries.find_by(external_id: "withdraw_001", source: "snaptrade")
     assert_not_nil entry
-    assert_equal(-200.00, entry.amount.to_f)  # Negative for withdrawals
+    assert_equal 200.00, entry.amount.to_f  # Positive for withdrawals (outflow in Sure's convention)
     assert_equal "Withdrawal", entry.entryable.investment_activity_label
   end
 
