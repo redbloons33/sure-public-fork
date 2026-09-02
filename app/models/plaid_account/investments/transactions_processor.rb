@@ -94,6 +94,20 @@ class PlaidAccount::Investments::TransactionsProcessor
 
     def label_from_plaid_type(transaction)
       plaid_type = transaction["type"]&.downcase
+      plaid_subtype = transaction["subtype"]&.downcase
+
+      # Plaid reports automatic cash sweeps between a brokerage's core position
+      # and a money-market / settlement vehicle as type "cash" with subtype
+      # "deposit" (cash swept in) or "withdrawal" (cash swept out). These are
+      # internal cash management, not income/expense, so label them as sweeps
+      # to keep them out of budget/income-statement analytics.
+      if plaid_type == "cash"
+        return "Sweep In" if plaid_subtype == "deposit"
+        return "Sweep Out" if plaid_subtype == "withdrawal"
+        return "Dividend" if plaid_subtype == "dividend"
+        return "Interest" if plaid_subtype == "interest"
+      end
+
       PLAID_TYPE_TO_LABEL[plaid_type] || "Other"
     end
 

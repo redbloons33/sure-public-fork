@@ -886,6 +886,10 @@ class Account::ProviderImportAdapter
     # Only detect the most obvious patterns - be conservative to avoid false positives
     # Users can manually adjust labels for edge cases
     case name_lower
+    when /\bsweep\b/
+      # Automatic cash sweep between a brokerage's core cash and a money-market
+      # vehicle. Sure convention: amount < 0 is an inflow to the account's cash.
+      amount.to_d.negative? ? "Sweep In" : "Sweep Out"
     when /^dividend\b/, /\bdividend payment\b/, /\bqualified dividend\b/, /\bordinary dividend\b/
       "Dividend"
     when /^interest\b/, /\binterest income\b/, /\binterest payment\b/
