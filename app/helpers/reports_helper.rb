@@ -1,4 +1,22 @@
 module ReportsHelper
+  # Path from a monthly trend row to the Transactions tab, filtered to that month.
+  #
+  # per_page is carried over from whatever the user last used on the transactions page.
+  # Supplying query params suppresses TransactionsController#store_params!'s restore
+  # branch, so an omitted per_page would both shrink the list to the pagination default
+  # of 10 and overwrite their stored preference on the way through.
+  def month_transactions_path(trend)
+    transactions_path(
+      page: 1,
+      per_page: stored_transactions_per_page,
+      q: { start_date: trend[:start_date].to_s, end_date: trend[:end_date].to_s }
+    )
+  end
+
+  def stored_transactions_per_page
+    Current.session&.prev_transaction_page_params&.dig("per_page").presence || 50
+  end
+
   # Returns CSS classes for tax treatment badge styling
   def tax_treatment_badge_classes(treatment)
     case treatment.to_sym

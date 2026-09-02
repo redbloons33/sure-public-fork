@@ -50,6 +50,7 @@ en:
       net: Net
       savings_rate: Savings Rate
       current: current
+      view_transactions: "View transactions for %{month}"
       avg_monthly_income: Avg. Monthly Income
       avg_monthly_expenses: Avg. Monthly Expenses
       avg_monthly_savings: Avg. Monthly Savings

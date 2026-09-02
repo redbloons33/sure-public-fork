@@ -331,6 +331,11 @@ class ReportsController < ApplicationController
         trends << {
           month: month_start.strftime("%b %Y"),
           is_current_month: (month_start.month == Date.current.month && month_start.year == Date.current.year),
+          # The exact bounds the totals above were computed over, so the drill-down link
+          # lands on the same rows the user is looking at. month_end is already clamped to
+          # the report period, and month_start deliberately is not — both match `period`.
+          start_date: month_start,
+          end_date: month_end,
           income: income,
           expenses: expenses,
           net: income - expenses

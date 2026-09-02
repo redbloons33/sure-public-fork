@@ -23,12 +23,14 @@
               <% trends_data.each_with_index do |trend, idx| %>
                 <tr class="<%= idx < trends_data.size - 1 ? "table-divider" : "" %>">
                   <td class="py-3 px-4 lg:px-6">
-                    <span class="flex items-center gap-2 <%= trend[:is_current_month] ? "font-medium" : "" %>">
+                    <%= link_to month_transactions_path(trend),
+                          class: ["flex items-center gap-2 text-primary hover:underline", ("font-medium" if trend[:is_current_month])],
+                          title: t("reports.trends.view_transactions", month: trend[:month]) do %>
                       <%= trend[:month] %>
                       <% if trend[:is_current_month] %>
                         <span class="text-xs text-subdued">(<%= t("reports.trends.current") %>)</span>
                       <% end %>
-                    </span>
+                    <% end %>
                   </td>
                   <td class="py-3 px-4 lg:px-6 text-right privacy-sensitive">
                     <%= Money.new(trend[:income], Current.family.currency).format %>
