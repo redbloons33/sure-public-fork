@@ -50,6 +50,17 @@ class SnaptradeAccount::ActivitiesProcessor
   # Activity types that result in Transaction records (cash movements)
   CASH_TYPES = %w[DIVIDEND DIV CONTRIBUTION WITHDRAWAL TRANSFER_IN TRANSFER_OUT TRANSFER INTEREST FEE TAX CASH].freeze
 
+  # Accounting lines that move no cash and change no position value. A brokerage reports
+  # them so its own statement reconciles, but they are not activity in Sure's sense: a
+  # realized gain/loss is the P&L on a sale that is already recorded as its own SELL, and a
+  # split or a worthless option expiry only restates share counts. Imported as ordinary
+  # transactions they read as income or expense that never happened, so they are skipped.
+  #
+  # Deliberately excluded from this list: MERGER, SPIN_OFF and CORP_ACTION, which can carry
+  # cash in lieu of fractional shares, and OTHER, which is the catch-all that legitimate
+  # cash rows fall into.
+  NON_CASH_TYPES = %w[REALIZEDGAINLOSS SPLIT SPLIT_REVERSE EXPIRED].freeze
+
   # Some brokerages (notably Fidelity workplace plans via SnapTrade) report payroll
   # contributions and withdrawals under the generic "TRANSFER" type, distinguishing them
   # only in the free-text description. Left as a bare "Transfer" they are labelled as an
@@ -102,6 +113,11 @@ class SnaptradeAccount::ActivitiesProcessor
       # Get external ID for deduplication
       external_id = (data[:id] || data["id"]).to_s
       return if external_id.blank?
+
+      if NON_CASH_TYPES.include?(activity_type)
+        Rails.logger.info "SnaptradeAccount::ActivitiesProcessor - Skipping non-cash activity: type=#{activity_type}, id=#{external_id}"
+        return
+      end
 
       Rails.logger.info "SnaptradeAccount::ActivitiesProcessor - Processing activity: type=#{activity_type}, id=#{external_id}"
 
