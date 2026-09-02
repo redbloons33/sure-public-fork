@@ -132,7 +132,7 @@ services:
     image: prodrigestivill/postgres-backup-local
     restart: unless-stopped
     volumes:
-      - /opt/sure-data/backups:/backups # Change this path to your desired backup location on the host machine
+      - /backups:/backups
     environment:
       - POSTGRES_HOST=db
       - POSTGRES_DB=${POSTGRES_DB:-sure_production}
