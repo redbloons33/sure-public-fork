@@ -1,124 +1,62 @@
-# Self Hosting Sure with Docker
+# Self-hosting Sure with Docker
 
-This guide will help you setup, update, and maintain your self-hosted Sure application with Docker Compose. Docker Compose is the most popular and recommended way to self-host the Sure app.
+This repo runs as four containers defined in [`compose.yml`](../../compose.yml): `web`, `worker`,
+`db` (PostgreSQL 16), and `redis`. The `web` and `worker` images are **built locally** from the
+`Dockerfile` in this repo (`image: sure-local:latest`) — there is no external image to pull.
 
-## Setup Guide
+## Setup
 
-Follow the guide below to get your app running.
+### 1. Install Docker
 
-### Step 1: Install Docker
-
-Complete the following steps:
-
-1. Install Docker Engine by following [the official guide](https://docs.docker.com/engine/install/)
-2. Start the Docker service on your machine
-3. Verify that Docker is installed correctly and is running by opening up a terminal and running the following command:
+Install Docker Engine ([official guide](https://docs.docker.com/engine/install/)) and confirm it runs:
 
 ```bash
-# If Docker is setup correctly, this command will succeed
 docker run hello-world
 ```
 
-### Step 2: Configure your Docker Compose file and environment
-
-#### Create a directory for your app to run
-
-Open your terminal and create a directory where your app will run. Below is an example command with a recommended directory:
+### 2. Create your environment file
 
 ```bash
-# Create a directory on your computer for Docker files (name it whatever you like)
-mkdir -p ~/docker-apps/sure
-
-# Once created, navigate your current working directory to the new folder
-cd ~/docker-apps/sure
+cp .env.example .env
 ```
 
-#### Copy our sample Docker Compose file
-
-Make sure you are in the directory you just created and run the following command:
-
-```bash
-# Download the sample compose.yml file from the GitHub repository
-curl -o compose.yml https://raw.githubusercontent.com/we-promise/sure/main/compose.example.yml
-```
-
-This command will do the following:
-
-1. Fetch the sample docker compose file from our public Github repository
-2. Creates a file in your current directory called `compose.yml` with the contents of the example file
-
-At this point, the only file in your current working directory should be `compose.yml`.
-
-### Step 3 (optional): Configure your environment
-
-By default, our `compose.example.yml` file runs without any configuration.  
-That said, if you would like extra security (important if you're running outside of a local network), you can follow the steps below to set things up.
-
-If you're running the app locally and don't care much about security, you can skip this step.
-
-#### Create your environment file
-
-In order to configure the app, you will need to create a file called `.env`, which is where Docker will read environment variables from.
-
-To do this, you should get our .env.example as a starting point:
-
-```bash
-curl -o .env https://raw.githubusercontent.com/we-promise/sure/main/.env.example
-```
-
-#### Generate the app secret key
-
-The app requires an environment variable called `SECRET_KEY_BASE` to run.
-
-We will first need to generate this in the terminal. If you have `openssl` installed on your computer, you can generate it with the following command:
+Generate a secret and put it in `.env` as `SECRET_KEY_BASE`:
 
 ```bash
 openssl rand -hex 64
+# no openssl?  head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n' && echo
 ```
 
-_Alternatively_, you can generate a key without openssl or any external dependencies by pasting the following bash command in your terminal and running it:
-
-```bash
-head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n' && echo
-```
-
-Once you have generated a key, save it and move on to the next step.
-
-#### Fill in your environment file
-
-Open the file named `.env` that we created in a prior step using your favorite text editor.
-
-Fill in this file with the following variables:
+The values that matter for a basic Docker run:
 
 ```txt
-SECRET_KEY_BASE="replacemewiththegeneratedstringfromthepriorstep"
-POSTGRES_PASSWORD="replacemewithyourdesireddatabasepassword"
+SECRET_KEY_BASE=<the generated string>
+POSTGRES_PASSWORD=<a database password you choose>
 ```
 
-#### Using HTTPS
+`compose.yml` supplies sensible defaults for everything else (`POSTGRES_USER=sure_user`,
+`POSTGRES_DB=sure_production`, `DB_HOST=db`, `REDIS_URL=redis://redis:6379/1`, `SELF_HOSTED=true`).
+Any variable you set in `.env` overrides the default. See `.env.example` for the full list
+(SMTP, S3/R2 storage, OIDC, Plaid, OpenAI, etc.) — all optional.
 
-Assuming you want to access your instance from the internet, you should have secured your URL address with an SSL certificate.  
-The Docker instance runs in plain HTTP and you need to tell it that you are redirecting your HTTPS stream to the HTTP one.  
-To do this, edit the `compose.yml` file and find the line stating:  
+### 3. Build and start
 
-```yaml
-RAILS_ASSUME_SSL: "false"
+```bash
+docker compose up -d --build
 ```
 
-and change it to `true`
+Open `http://localhost:3000` and register an account with "create your account".
 
-```yaml
-RAILS_ASSUME_SSL: "true"
-```
+### Running behind HTTPS
 
-#### Binding to IPv6 (optional)
+If a reverse proxy terminates TLS in front of the container, set `RAILS_ASSUME_SSL: "true"` in the
+`web` service environment in `compose.yml` (default is `"false"` for plain-HTTP local use).
 
-By default Sure listens on `0.0.0.0:3000` (IPv4 wildcard) inside the container and Docker publishes the port on the host's IPv4 interface only. If you want the app reachable over IPv6 as well, two things need to change:
+### Binding to IPv6 (optional)
 
-1. **Tell the app to bind to `[::]`** by setting `BINDING=::` in the container environment. `BINDING` is Rails' native env var for the server bind address. On any kernel with `net.ipv6.bindv6only=0` (the default on Linux and macOS) a single `[::]` bind is **dual-stack**: it accepts both IPv6 and IPv4 clients from the same socket. You do not need two binds and you do not need two ports.
-2. **Tell Docker to publish the host port on IPv6** by adding a bracketed-host `ports:` entry alongside the existing IPv4 one.
-
-In `compose.yml`:
+By default the container listens on `0.0.0.0:3000` and Docker publishes it on the host's IPv4
+interface. To also serve IPv6, set `BINDING: "::"` in the `web` environment and add a bracketed-host
+port entry alongside the existing one:
 
 ```yaml
 services:
@@ -131,177 +69,50 @@ services:
       BINDING: "::"
 ```
 
-With both changes in place, `http://127.0.0.1:3000/` and `http://[::1]:3000/` both work against the same container.
+On Linux/macOS the `[::]` bind is dual-stack, so it accepts both IPv4 and IPv6 clients.
 
-**Note:** Docker's default userland proxy already bridges host-side IPv6 publishes to the container's internal IPv4 address, so in many setups just adding the `[::]:` port entry is enough. Setting `BINDING=::` inside the container only becomes load-bearing when the Docker daemon has `"ipv6": true` + `"ip6tables": true` configured (uncommon for self-hosters) and forwards raw IPv6 packets into the container via netfilter instead of the proxy. Setting both is harmless and future-proof.
-
-If you are running behind a reverse proxy that terminates TLS, nothing else changes — `proxy_pass http://[::1]:3000` and `proxy_pass http://127.0.0.1:3000` both work because the `[::]` bind is dual-stack.
-
-#### Local development bind
-
-For `bin/dev` on your own machine, the server now defaults to Rails' native `localhost` bind (`127.0.0.1` + `[::1]`) — only reachable from the same machine. If you need external access (phone on the same WiFi, devcontainer port forwarding, LAN testing), set the Rails-native env var:
+## Updating
 
 ```bash
-BINDING=0.0.0.0 bin/dev   # reachable from LAN
-BINDING=::       bin/dev  # IPv6 dual-stack
+git pull
+docker compose up -d --build
 ```
 
-The bundled devcontainer at `.devcontainer/docker-compose.yml` already pins `BINDING: "0.0.0.0"` so Docker port forwarding reaches the app — no manual override needed when using the devcontainer.
+The `web` container's entrypoint (`bin/docker-entrypoint`) runs `db:prepare` on boot, so pending
+migrations are applied automatically.
 
-### Step 4: Run the app
+## Backups
 
-You are now ready to run the app. Start with the following command to make sure everything is working:
+`compose.yml` includes an optional `backup` service that runs daily `pg_dump` snapshots to
+`/opt/sure-data/backups` on the host (edit that path in `compose.yml`). Enable it with:
 
 ```bash
-docker compose up
+docker compose --profile backup up -d
 ```
 
-This will pull our official Docker image and start the app. You will see logs in your terminal.
-
-Open your browser, and navigate to `http://localhost:3000`.
-
-If everything is working, you will see the Sure login screen.
-
-### Step 5: Create your account
-
-The first time you run the app, you will need to register a new account by hitting "create your account" on the login page.
-
-1. Enter your email
-2. Enter a password
-
-### Step 6: Run the app in the background
-
-Most self-hosting users will want the Sure app to run in the background on their computer so they can access it at all times. To do this, hit `Ctrl+C` to stop the running process, and then run the following command:
-
-```bash
-docker compose up -d
-```
-
-The `-d` flag will run Docker Compose in "detached" mode. To verify it is running, you can run the following command:
-
-```
-docker compose ls
-```
-
-### Step 7: Enjoy!
-
-Your app is now set up. You can visit it at `http://localhost:3000` in your browser.
-
-If you find bugs or have a feature request, be sure to read through our [contributing guide here](https://github.com/we-promise/sure/wiki/How-to-Contribute-Effectively-to-Sure).
-
-## AI features, external assistant, and Pipelock
-
-Sure ships with a separate compose file for AI-related features: `compose.example.ai.yml`. It adds:
-
-- **Pipelock** (always on): AI agent security proxy that scans outbound LLM calls and inbound MCP traffic
-- **Ollama + Open WebUI** (optional `--profile ai`): local LLM inference
-
-### Using the AI compose file
-
-```bash
-# Download both compose files
-curl -o compose.yml https://raw.githubusercontent.com/we-promise/sure/main/compose.example.yml
-curl -o compose.ai.yml https://raw.githubusercontent.com/we-promise/sure/main/compose.example.ai.yml
-curl -o pipelock.example.yaml https://raw.githubusercontent.com/we-promise/sure/main/pipelock.example.yaml
-
-# Run with Pipelock (no local LLM)
-docker compose -f compose.ai.yml up -d
-
-# Run with Pipelock + Ollama
-docker compose -f compose.ai.yml --profile ai up -d
-```
-
-### Setting up the external AI assistant
-
-The external assistant delegates chat to a remote AI agent instead of calling LLMs directly. The agent calls back to Sure's `/mcp` endpoint for financial data (accounts, transactions, balance sheet).
-
-1. Set the MCP endpoint credentials in your `.env`:
-   ```bash
-   MCP_API_TOKEN=generate-a-random-token-here
-   MCP_USER_EMAIL=your@email.com   # must match an existing Sure user
-   ```
-
-2. Set the external assistant connection:
-   ```bash
-   EXTERNAL_ASSISTANT_URL=https://your-agent/v1/chat/completions
-   EXTERNAL_ASSISTANT_TOKEN=your-agent-api-token
-   ```
-
-3. Choose how to activate:
-   - **Per-family (UI):** Go to Settings > Self-Hosting > AI Assistant, select "External"
-   - **Global (env):** Set `ASSISTANT_TYPE=external` to force all families to use external
-
-See [docs/hosting/ai.md](ai.md) for full configuration details including agent ID, session keys, and email allowlisting.
-
-### Pipelock security proxy
-
-Pipelock sits between Sure and external services, scanning AI traffic for:
-
-- **Secret exfiltration** (DLP): catches API keys, tokens, or personal data leaking in prompts
-- **Prompt injection**: detects attempts to override system instructions
-- **Tool poisoning**: validates MCP tool calls against known-safe patterns
-
-When using `compose.example.ai.yml`, Pipelock is always running. External AI agents should connect to port 8889 (MCP reverse proxy) instead of directly to Sure's `/mcp` on port 3000.
-
-For full Pipelock configuration, see [docs/hosting/pipelock.md](pipelock.md).
-
-## How to update your app
-
-The mechanism that updates your self-hosted Sure app is the GHCR (Github Container Registry) Docker image that you see in the `compose.yml` file:
-
-```yml
-image: ghcr.io/we-promise/sure:latest
-```
-
-We recommend using one of the following images, but you can pin your app to whatever version you'd like (see [packages](https://github.com/we-promise/sure/pkgs/container/sure)):
-
-- `ghcr.io/we-promise/sure:latest` (latest `alpha`)
-- `ghcr.io/we-promise/sure:stable` (latest release)
-
-By default, your app _will NOT_ automatically update. To update your self-hosted app, run the following commands in your terminal:
-
-```bash
-cd ~/docker-apps/sure # Navigate to whatever directory you configured the app in
-docker compose pull # This pulls the "latest" published image from GHCR
-docker compose build # This rebuilds the app with updates
-docker compose up --no-deps -d web worker # This restarts the app using the newest version
-```
-
-## How to change which updates your app receives
-
-If you'd like to pin the app to a specific version or tag, all you need to do is edit the `compose.yml` file:
-
-```yml
-image: ghcr.io/we-promise/sure:stable
-```
-
-After doing this, make sure and restart the app:
-
-```bash
-docker compose pull # This pulls the "latest" published image from GHCR
-docker compose build # This rebuilds the app with updates
-docker compose up --no-deps -d web worker # This restarts the app using the newest version
-```
+To move an existing instance to a new host, see
+[migrating-to-a-new-host.md](migrating-to-a-new-host.md).
 
 ## Troubleshooting
 
-### ActiveRecord::DatabaseConnectionError
+### ActiveRecord::DatabaseConnectionError on first run
 
-If you are trying to get Sure started for the **first time** and run into database connection issues, it is likely because Docker has already initialized the Postgres database with a _different_ default role (usually from a previous attempt to start the app).
+Usually means Docker already initialised the Postgres volume with different credentials from an
+earlier attempt. Reset the database volume (**this deletes all data in the Sure database**):
 
-If you run into this issue, you can optionally **reset the database**.
-
-**PLEASE NOTE: this will delete any existing data that you have in your Sure database, so proceed with caution.**  For first-time users of the app just trying to get started, you're generally safe to run the commands below.
-
-By running the commands below, you will delete your existing Sure database and "reset" it.
-
-```
+```bash
 docker compose down
-docker volume rm sure_postgres-data # this is the name of the volume the DB is mounted to
-docker compose up
-docker compose exec db psql -U sure_user -d sure_development -c "SELECT 1;" # This will verify that the issue is fixed
+docker volume rm sure_postgres-data
+docker compose up -d --build
 ```
 
-### Slow `.csv` import (processing rows taking longer than expected)
+### Slow CSV imports
 
-Importing comma-separated-value file(s) requires the `sure-worker` container to communicate with Redis. Check your worker logs for any unexpected errors, such as connection timeouts or Redis communication failures.
+CSV import work runs in the `worker` container and needs Redis. Check `docker compose logs worker`
+for Redis connection errors.
+
+### IPv6 / "Failed to open TCP connection" during sync
+
+If outbound syncs (e.g. Yahoo Finance) fail because DNS resolves to IPv6 first inside a container
+without IPv6, `compose.yml` already sets explicit IPv4 DNS servers (`8.8.8.8`, `1.1.1.1`). You can
+also pin hosts via `extra_hosts:` in the `web`/`worker` services.

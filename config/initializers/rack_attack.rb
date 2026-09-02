@@ -5,38 +5,9 @@ class Rack::Attack
   enabled = Rails.env.production? || Rails.env.staging?
   self.enabled = enabled
 
-  # Throttle requests to the OAuth token endpoint
-  throttle("oauth/token", limit: 10, period: 1.minute) do |request|
-    request.ip if request.path == "/oauth/token"
-  end
-
   # Throttle admin endpoints to prevent brute-force attacks
-  # More restrictive than general API limits since admin access is sensitive
   throttle("admin/ip", limit: 10, period: 1.minute) do |request|
     request.ip if request.path.start_with?("/admin/")
-  end
-
-  # Determine limits based on self-hosted mode
-  self_hosted = Rails.application.config.app_mode.self_hosted?
-
-  # Throttle API requests per access token
-  throttle("api/requests", limit: self_hosted ? 10_000 : 100, period: 1.hour) do |request|
-    if request.path.start_with?("/api/")
-      # Extract access token from Authorization header
-      auth_header = request.get_header("HTTP_AUTHORIZATION")
-      if auth_header&.start_with?("Bearer ")
-        token = auth_header.split(" ").last
-        "api_token:#{Digest::SHA256.hexdigest(token)}"
-      else
-        # Fall back to IP-based limiting for unauthenticated requests
-        "api_ip:#{request.ip}"
-      end
-    end
-  end
-
-  # More permissive throttling for API requests by IP (for development/testing)
-  throttle("api/ip", limit: self_hosted ? 20_000 : 200, period: 1.hour) do |request|
-    request.ip if request.path.start_with?("/api/")
   end
 
   # Block requests that appear to be malicious

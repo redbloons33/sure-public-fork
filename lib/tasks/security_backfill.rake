@@ -42,9 +42,6 @@ namespace :security do
     # Session user_agent (encryption) and ip_address_digest (hashing)
     results[:sessions] = backfill_sessions(batch_size, dry_run)
 
-    # MobileDevice device_id
-    results[:mobile_devices] = backfill_model(MobileDevice, %i[device_id], batch_size, dry_run)
-
     # Provider items
     results[:plaid_items] = backfill_model(PlaidItem, %i[access_token raw_payload raw_institution_payload], batch_size, dry_run)
     results[:simplefin_items] = backfill_model(SimplefinItem, %i[access_url raw_payload raw_institution_payload], batch_size, dry_run)

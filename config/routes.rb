@@ -113,19 +113,11 @@ Rails.application.routes.draw do
       post :new_connection
     end
   end
-  use_doorkeeper
   # MFA routes
   resource :mfa, controller: "mfa", only: [ :new, :create ] do
     get :verify
     post :verify, to: "mfa#verify_code"
     delete :disable
-  end
-
-  mount Lookbook::Engine, at: "/design-system"
-
-  if Rails.env.development?
-    mount Rswag::Api::Engine => "/api-docs"
-    mount Rswag::Ui::Engine => "/api-docs"
   end
 
   # Uses basic auth - see config/initializers/sidekiq.rb
@@ -156,7 +148,6 @@ Rails.application.routes.draw do
 
   resource :registration, only: %i[new create]
   resources :sessions, only: %i[index new create destroy]
-  get "/auth/mobile/:provider", to: "sessions#mobile_sso_start"
   match "/auth/:provider/callback", to: "sessions#openid_connect", via: %i[get post]
   match "/auth/failure", to: "sessions#failure", via: %i[get post]
   get "/auth/logout/callback", to: "sessions#post_logout"
@@ -405,54 +396,6 @@ Rails.application.routes.draw do
   resources :invitations, only: [ :new, :create, :destroy ] do
     get :accept, on: :member
   end
-
-  # API routes
-  namespace :api do
-    namespace :v1 do
-      # Authentication endpoints
-      post "auth/signup", to: "auth#signup"
-      post "auth/login", to: "auth#login"
-      post "auth/refresh", to: "auth#refresh"
-      post "auth/sso_exchange", to: "auth#sso_exchange"
-      post "auth/sso_link", to: "auth#sso_link"
-      post "auth/sso_create_account", to: "auth#sso_create_account"
-      patch "auth/enable_ai", to: "auth#enable_ai"
-
-      # Production API endpoints
-      resources :accounts, only: [ :index, :show ]
-      resources :categories, only: [ :index, :show ]
-      resources :merchants, only: %i[index show]
-      resources :tags, only: %i[index show create update destroy]
-
-      resources :transactions, only: [ :index, :show, :create, :update, :destroy ]
-      resources :trades, only: [ :index, :show, :create, :update, :destroy ]
-      resources :holdings, only: [ :index, :show ]
-      resources :valuations, only: [ :create, :update, :show ]
-      resources :imports, only: [ :index, :show, :create ]
-      resource :usage, only: [ :show ], controller: :usage
-      resource :balance_sheet, only: [ :show ], controller: :balance_sheet
-      post :sync, to: "sync#create"
-
-      resources :chats, only: [ :index, :show, :create, :update, :destroy ] do
-        resources :messages, only: [ :create ] do
-          post :retry, on: :collection
-        end
-      end
-
-      delete "users/reset", to: "users#reset"
-      delete "users/me", to: "users#destroy"
-
-      # Test routes for API controller testing (only available in test environment)
-      if Rails.env.test?
-        get "test", to: "test#index"
-        get "test_not_found", to: "test#not_found"
-        get "test_family_access", to: "test#family_access"
-        get "test_scope_required", to: "test#scope_required"
-        get "test_multiple_scopes_required", to: "test#multiple_scopes_required"
-      end
-    end
-  end
-
 
 
   resources :currencies, only: %i[show]

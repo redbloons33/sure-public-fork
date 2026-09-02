@@ -24,10 +24,6 @@ gem "stimulus-rails"
 gem "turbo-rails"
 gem "view_component"
 
-# https://github.com/lookbook-hq/lookbook/issues/712
-# TODO: Remove max version constraint when fixed
-gem "lookbook", "2.3.11"
-
 gem "hotwire_combobox"
 
 # Background Jobs
@@ -58,10 +54,8 @@ gem "ed25519" # For Coinbase CDP API authentication
 gem "jbuilder"
 gem "countries"
 
-# OAuth & API Security
-gem "doorkeeper"
+# API Security
 gem "rack-attack", "~> 6.6"
-gem "rack-cors"
 gem "pundit"
 gem "faraday"
 gem "faraday-retry"
@@ -110,35 +104,11 @@ group :development, :test do
   gem "dotenv-rails"
 end
 
-if ENV["BENCHMARKING_ENABLED"]
-  gem "dotenv-rails", groups: [ :production ]
-end
-
 group :development do
   gem "hotwire-livereload"
   gem "letter_opener"
   gem "ruby-lsp-rails"
   gem "web-console"
   gem "faker"
-  gem "benchmark-ips"
-  gem "stackprof"
-  gem "derailed_benchmarks"
   gem "foreman"
-end
-
-group :development, :test do
-  gem "rspec-rails"
-  gem "rswag-api"
-  gem "rswag-specs"
-  gem "rswag-ui"
-end
-
-group :test do
-  gem "capybara"
-  gem "selenium-webdriver"
-  gem "mocha"
-  gem "vcr"
-  gem "webmock"
-  gem "climate_control"
-  gem "simplecov", require: false
 end

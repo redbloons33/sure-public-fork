@@ -2,7 +2,7 @@ class SessionsController < ApplicationController
   extend SslConfigurable
 
   before_action :set_session, only: :destroy
-  skip_authentication only: %i[index new create openid_connect failure post_logout mobile_sso_start]
+  skip_authentication only: %i[index new create openid_connect failure post_logout]
 
   layout "auth"
 
@@ -13,8 +13,6 @@ class SessionsController < ApplicationController
 
   def new
     store_pending_invitation_if_valid
-    # Clear any stale mobile SSO session flag from an abandoned mobile flow
-    session.delete(:mobile_sso)
 
     begin
       demo = Rails.application.config_for(:demo)
@@ -35,9 +33,6 @@ class SessionsController < ApplicationController
   end
 
   def create
-    # Clear any stale mobile SSO session flag from an abandoned mobile flow
-    session.delete(:mobile_sso)
-
     user = nil
 
     if AuthConfig.local_login_enabled?
@@ -114,34 +109,6 @@ class SessionsController < ApplicationController
     redirect_to new_session_path, notice: t(".logout_successful")
   end
 
-  def mobile_sso_start
-    provider = params[:provider].to_s
-    configured_providers = Rails.configuration.x.auth.sso_providers.map { |p| p[:name].to_s }
-
-    unless configured_providers.include?(provider)
-      mobile_sso_redirect(error: "invalid_provider", message: "SSO provider not configured")
-      return
-    end
-
-    device_params = params.permit(:device_id, :device_name, :device_type, :os_version, :app_version)
-    unless device_params[:device_id].present? && device_params[:device_name].present? && device_params[:device_type].present?
-      mobile_sso_redirect(error: "missing_device_info", message: "Device information is required")
-      return
-    end
-
-    session[:mobile_sso] = {
-      device_id: device_params[:device_id],
-      device_name: device_params[:device_name],
-      device_type: device_params[:device_type],
-      os_version: device_params[:os_version],
-      app_version: device_params[:app_version]
-    }
-
-    # Render auto-submitting form to POST to OmniAuth (required by omniauth-rails_csrf_protection)
-    @provider = provider
-    render layout: false
-  end
-
   def openid_connect
     auth = request.env["omniauth.auth"]
 
@@ -163,17 +130,6 @@ class SessionsController < ApplicationController
       # Log successful SSO login
       SsoAuditLog.log_login!(user: user, provider: auth.provider, request: request)
 
-      # Mobile SSO: issue Doorkeeper tokens and redirect to app
-      if session[:mobile_sso].present?
-        if user.otp_required?
-          session.delete(:mobile_sso)
-          mobile_sso_redirect(error: "mfa_not_supported", message: "MFA users should sign in with email and password")
-        else
-          handle_mobile_sso_callback(user)
-        end
-        return
-      end
-
       # Store id_token and provider for RP-initiated logout
       session[:id_token_hint] = auth.credentials&.id_token if auth.credentials&.id_token
       session[:sso_login_provider] = auth.provider
@@ -188,13 +144,6 @@ class SessionsController < ApplicationController
         redirect_to root_path
       end
     else
-      # Mobile SSO with no linked identity - cache pending auth and redirect
-      # back to the app with a linking code so the user can link or create an account
-      if session[:mobile_sso].present?
-        handle_mobile_sso_onboarding(auth)
-        return
-      end
-
       # No existing OIDC identity - need to link to account
       # Store auth data in session and redirect to linking page
       session[:pending_oidc_auth] = {
@@ -221,13 +170,6 @@ class SessionsController < ApplicationController
       reason: sanitized_reason
     )
 
-    # Mobile SSO: redirect back to the app with error instead of web login page
-    if session[:mobile_sso].present?
-      session.delete(:mobile_sso)
-      mobile_sso_redirect(error: sanitized_reason, message: "SSO authentication failed")
-      return
-    end
-
     message = case sanitized_reason
     when "sso_provider_unavailable"
       t("sessions.failure.sso_provider_unavailable")
@@ -241,77 +183,6 @@ class SessionsController < ApplicationController
   end
 
   private
-    def handle_mobile_sso_callback(user)
-      device_info = session.delete(:mobile_sso)
-
-      unless device_info.present?
-        mobile_sso_redirect(error: "missing_session", message: "Mobile SSO session expired")
-        return
-      end
-
-      device = MobileDevice.upsert_device!(user, device_info.symbolize_keys)
-      token_response = device.issue_token!
-
-      # Store tokens behind a one-time authorization code instead of passing in URL
-      authorization_code = SecureRandom.urlsafe_base64(32)
-      Rails.cache.write(
-        "mobile_sso:#{authorization_code}",
-        token_response.merge(
-          user_id: user.id,
-          user_email: user.email,
-          user_first_name: user.first_name,
-          user_last_name: user.last_name,
-          user_ui_layout: user.ui_layout,
-          user_ai_enabled: user.ai_enabled?
-        ),
-        expires_in: 5.minutes
-      )
-
-      mobile_sso_redirect(code: authorization_code)
-    rescue ActiveRecord::RecordInvalid => e
-      Rails.logger.warn("[Mobile SSO] Device save failed: #{e.record.errors.full_messages.join(', ')}")
-      mobile_sso_redirect(error: "device_error", message: "Unable to register device")
-    end
-
-    def handle_mobile_sso_onboarding(auth)
-      device_info = session.delete(:mobile_sso)
-      email = auth.info&.email
-
-      has_pending_invitation = email.present? && Invitation.pending.exists?(email: email)
-      allow_creation = has_pending_invitation || (!AuthConfig.jit_link_only? && AuthConfig.allowed_oidc_domain?(email))
-
-      linking_code = SecureRandom.urlsafe_base64(32)
-      Rails.cache.write(
-        "mobile_sso_link:#{linking_code}",
-        {
-          provider: auth.provider,
-          uid: auth.uid,
-          email: email,
-          first_name: auth.info&.first_name,
-          last_name: auth.info&.last_name,
-          name: auth.info&.name,
-          issuer: auth.extra&.raw_info&.iss || auth.extra&.raw_info&.[]("iss"),
-          device_info: device_info,
-          allow_account_creation: allow_creation
-        },
-        expires_in: 10.minutes
-      )
-
-      mobile_sso_redirect(
-        status: "account_not_linked",
-        linking_code: linking_code,
-        email: email,
-        first_name: auth.info&.first_name,
-        last_name: auth.info&.last_name,
-        allow_account_creation: allow_creation,
-        has_pending_invitation: has_pending_invitation
-      )
-    end
-
-    def mobile_sso_redirect(params = {})
-      redirect_to "sureapp://oauth/callback?#{params.to_query}", allow_other_host: true
-    end
-
     def set_session
       @session = Current.user.sessions.find(params[:id])
     end

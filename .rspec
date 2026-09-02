@@ -1,2 +1,0 @@
---require spec_helper
---pattern spec/requests/api/v1/**/*_spec.rb

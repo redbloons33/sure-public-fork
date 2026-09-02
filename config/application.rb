@@ -34,11 +34,6 @@ module Sure
       config.active_record.encryption = Rails.application.credentials.active_record_encryption
     end
 
-    config.view_component.preview_controller = "LookbooksController"
-    config.lookbook.preview_display_options = {
-      theme: [ "light", "dark" ] # available in view as params[:theme]
-    }
-
     # Enable Skylight instrumentation for ActiveJob (background workers)
     config.skylight.probes << "active_job" if defined?(Skylight)
 
