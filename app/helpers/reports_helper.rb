@@ -16,12 +16,6 @@ module ReportsHelper
     filtered_transactions_path(start_date, end_date, type: type, categories: [ item[:category_name] ])
   end
 
-  # Trades are not Transactions, so the "Other Investments" row has nothing to show on the
-  # transactions page. Leave it unlinked rather than send the user to an empty list.
-  def breakdown_row_linkable?(item)
-    item[:category_id] != :other_investments
-  end
-
   def filtered_transactions_path(start_date, end_date, type: nil, categories: nil)
     q = { start_date: start_date.to_s, end_date: end_date.to_s }
     q[:types] = [ type.to_s ] if type.present?

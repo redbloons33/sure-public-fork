@@ -30,16 +30,10 @@
           rounded: true
         ) %>
       <% end %>
-      <% if breakdown_row_linkable?(item) %>
-        <%= link_to item[:category_name],
-              category_transactions_path(item, type: type, start_date: start_date, end_date: end_date),
-              class: "font-medium text-primary hover:underline",
-              title: t("reports.transactions_breakdown.table.view_transactions", category: item[:category_name]) %>
-      <% else %>
-        <span class="font-medium text-primary">
-          <%= item[:category_name] %>
-        </span>
-      <% end %>
+      <%= link_to item[:category_name],
+            category_transactions_path(item, type: type, start_date: start_date, end_date: end_date),
+            class: "font-medium text-primary hover:underline",
+            title: t("reports.transactions_breakdown.table.view_transactions", category: item[:category_name]) %>
       <span class="text-xs text-subdued whitespace-nowrap">
         (<%= t("reports.transactions_breakdown.table.entries", count: item[:count]) %>)
       </span>

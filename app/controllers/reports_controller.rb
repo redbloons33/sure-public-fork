@@ -348,28 +348,30 @@ class ReportsController < ApplicationController
     end
 
     def build_transactions_breakdown
-      # Base query: all transactions in the period
-      # Exclude transfers, one-time, and CC payments (matching income_statement logic)
+      # Rows are selected by Transaction.budget_eligible_sql — the same rule the income
+      # statement uses — so this section's Income and Expense totals equal the headline
+      # figures at the top of the page.
+      #
+      # Trades are excluded for the reason the statement excludes them: selling one holding
+      # to buy another is portfolio rebalancing, not cash flow. Money actually entering or
+      # leaving an investment account arrives as a Transaction and is still counted here.
       transactions = Transaction
         .joins(:entry)
         .joins(entry: :account)
         .where(accounts: { family_id: Current.family.id, status: [ "draft", "active" ] })
-        .where(entries: { entryable_type: "Transaction", excluded: false, date: @period.date_range })
-        .where.not(kind: Transaction::BUDGET_EXCLUDED_KINDS)
+        .where(entries: { entryable_type: "Transaction", date: @period.date_range })
+        .where(
+          Transaction.budget_eligible_sql(
+            txn_alias: "transactions",
+            entry_alias: "entries",
+            account_alias: "accounts",
+            tax_advantaged_account_ids: Current.family.tax_advantaged_account_ids
+          )
+        )
         .includes(entry: :account, category: :parent)
 
       # Apply filters (includes finance account scoping)
       transactions = apply_transaction_filters(transactions)
-
-      # Get trades in the period (matching income_statement logic)
-      trades = Trade
-        .joins(:entry)
-        .joins(entry: :account)
-        .where(accounts: { family_id: Current.family.id, status: [ "draft", "active" ] })
-        .where(entries: { entryable_type: "Trade", excluded: false, date: @period.date_range })
-        .includes(entry: :account, category: :parent)
-
-      trades = apply_entry_filters(trades)
 
       # Get sort parameters
       sort_by = params[:sort_by] || "amount"
@@ -390,12 +392,11 @@ class ReportsController < ApplicationController
         { category_id: category.id, category_name: category.name, category_color: category.color, category_icon: category.lucide_icon, total: 0, count: 0 }
       end
 
-      # Helper to process an entry (transaction or trade)
-      process_entry = ->(category, entry, is_trade, kind = nil) do
+      # Helper to process a transaction into its category group
+      process_entry = ->(category, entry, kind) do
         # Same classification the income statement uses: a loan_payment is an expense on
-        # either side of the ledger, so sign alone would file it under Income. Trades have
-        # no kind and fall through to the sign check.
-        type = if !is_trade && Transaction::ALWAYS_EXPENSE_KINDS.include?(kind)
+        # either side of the ledger, so sign alone would file it under Income.
+        type = if Transaction::ALWAYS_EXPENSE_KINDS.include?(kind)
           "expense"
         else
           entry.amount > 0 ? "expense" : "income"
@@ -407,14 +408,8 @@ class ReportsController < ApplicationController
         end
 
         if category.nil?
-          # Uncategorized or Other Investments (for trades)
-          if is_trade
-            parent_key = [ :other_investments, type ]
-            grouped_data[parent_key] ||= init_category_group.call(:other_investments, Category.other_investments.name, Category.other_investments.color, Category.other_investments.lucide_icon, type)
-          else
-            parent_key = [ :uncategorized, type ]
-            grouped_data[parent_key] ||= init_category_group.call(:uncategorized, Category.uncategorized.name, Category.uncategorized.color, Category.uncategorized.lucide_icon, type)
-          end
+          parent_key = [ :uncategorized, type ]
+          grouped_data[parent_key] ||= init_category_group.call(:uncategorized, Category.uncategorized.name, Category.uncategorized.color, Category.uncategorized.lucide_icon, type)
         elsif category.parent_id.present?
           # This is a subcategory - group under parent
           parent = category.parent
@@ -435,14 +430,8 @@ class ReportsController < ApplicationController
         grouped_data[parent_key][:total] += converted_amount
       end
 
-      # Process transactions
       transactions.each do |transaction|
-        process_entry.call(transaction.category, transaction.entry, false, transaction.kind)
-      end
-
-      # Process trades
-      trades.each do |trade|
-        process_entry.call(trade.category, trade.entry, true)
+        process_entry.call(transaction.category, transaction.entry, transaction.kind)
       end
 
       # Convert to array and sort subcategories
