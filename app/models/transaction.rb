@@ -79,9 +79,51 @@ class Transaction < ApplicationRecord
   TRANSFER_KINDS = %w[funds_movement cc_payment loan_payment investment_contribution].freeze
 
   # Kinds excluded from budget/income-statement analytics.
-  # loan_payment and investment_contribution are intentionally NOT here —
-  # they represent real cash outflow from a budgeting perspective.
+  # loan_payment and investment_contribution are intentionally NOT here — they are real
+  # cash movement that belongs in the statement. How each is classified once included is
+  # decided by ALWAYS_EXPENSE_KINDS below.
   BUDGET_EXCLUDED_KINDS = %w[funds_movement one_time cc_payment].freeze
+
+  # Kinds that count as an expense no matter which side of the ledger they sit on.
+  #
+  # A matched transfer always books the funding side (positive/outflow) as the
+  # investment_contribution or loan_payment, and the receiving side as funds_movement — see
+  # Transfer.kind_for_account. So an investment_contribution can be classified by its sign
+  # like any other row: positive means cash left a tracked account for savings (an expense),
+  # while negative means the contribution arrived from outside the tracked accounts entirely
+  # — an employer payroll or match contribution — which is real income.
+  #
+  # loan_payment stays here because a provider can import a negative (debt-reducing) payment
+  # directly onto a Loan account, which is still money you spent.
+  ALWAYS_EXPENSE_KINDS = %w[loan_payment].freeze
+
+  # SQL: income-statement classification for a transaction row.
+  def self.income_classification_sql(txn_alias = "t", entry_alias = "ae")
+    <<~SQL.squish
+      CASE WHEN #{txn_alias}.kind IN (#{always_expense_kinds_sql})
+             THEN 'expense'
+           WHEN #{entry_alias}.amount < 0
+             THEN 'income'
+           ELSE 'expense' END
+    SQL
+  end
+
+  # SQL: the amount a row contributes to its classification bucket, converted to the
+  # family currency. ALWAYS_EXPENSE_KINDS are forced positive so a sign-flipped row cannot
+  # cancel out genuine expenses; every other kind keeps its natural sign, which is what
+  # makes the surrounding ABS(SUM(...)) correct.
+  def self.income_amount_sql(txn_alias = "t", entry_alias = "ae", rate_alias = "er")
+    converted = "#{entry_alias}.amount * COALESCE(#{rate_alias}.rate, 1)"
+    <<~SQL.squish
+      CASE WHEN #{txn_alias}.kind IN (#{always_expense_kinds_sql})
+             THEN ABS(#{converted})
+           ELSE #{converted} END
+    SQL
+  end
+
+  def self.always_expense_kinds_sql
+    ALWAYS_EXPENSE_KINDS.map { |k| "'#{k}'" }.join(", ")
+  end
 
   # All valid investment activity labels (for UI dropdown)
   ACTIVITY_LABELS = [

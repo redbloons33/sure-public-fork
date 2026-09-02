@@ -60,8 +60,8 @@ class IncomeStatement::Totals
         SELECT
           c.id as category_id,
           c.parent_id as parent_category_id,
-          CASE WHEN at.kind IN ('investment_contribution', 'loan_payment') THEN 'expense' WHEN ae.amount < 0 THEN 'income' ELSE 'expense' END as classification,
-          ABS(SUM(CASE WHEN at.kind IN ('investment_contribution', 'loan_payment') THEN ABS(ae.amount * COALESCE(er.rate, 1)) ELSE ae.amount * COALESCE(er.rate, 1) END)) as total,
+          #{Transaction.income_classification_sql("at", "ae")} as classification,
+          ABS(SUM(#{Transaction.income_amount_sql("at", "ae")})) as total,
           COUNT(ae.id) as transactions_count,
           false as is_uncategorized_investment
         FROM (#{@transactions_scope.to_sql}) at
@@ -77,9 +77,9 @@ class IncomeStatement::Totals
           AND ae.excluded = false
           AND a.family_id = :family_id
           AND a.status IN ('draft', 'active')
-          #{exclude_tax_advantaged_sql}
+          #{tax_advantaged_filter_sql}
           #{include_finance_accounts_sql}
-        GROUP BY c.id, c.parent_id, CASE WHEN at.kind IN ('investment_contribution', 'loan_payment') THEN 'expense' WHEN ae.amount < 0 THEN 'income' ELSE 'expense' END;
+        GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")};
       SQL
     end
 
@@ -88,8 +88,8 @@ class IncomeStatement::Totals
         SELECT
           c.id as category_id,
           c.parent_id as parent_category_id,
-          CASE WHEN at.kind IN ('investment_contribution', 'loan_payment') THEN 'expense' WHEN ae.amount < 0 THEN 'income' ELSE 'expense' END as classification,
-          ABS(SUM(CASE WHEN at.kind IN ('investment_contribution', 'loan_payment') THEN ABS(ae.amount * COALESCE(er.rate, 1)) ELSE ae.amount * COALESCE(er.rate, 1) END)) as total,
+          #{Transaction.income_classification_sql("at", "ae")} as classification,
+          ABS(SUM(#{Transaction.income_amount_sql("at", "ae")})) as total,
           COUNT(ae.id) as entry_count,
           false as is_uncategorized_investment
         FROM (#{@transactions_scope.to_sql}) at
@@ -109,9 +109,9 @@ class IncomeStatement::Totals
           AND ae.excluded = false
           AND a.family_id = :family_id
           AND a.status IN ('draft', 'active')
-          #{exclude_tax_advantaged_sql}
+          #{tax_advantaged_filter_sql}
           #{include_finance_accounts_sql}
-        GROUP BY c.id, c.parent_id, CASE WHEN at.kind IN ('investment_contribution', 'loan_payment') THEN 'expense' WHEN ae.amount < 0 THEN 'income' ELSE 'expense' END
+        GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")}
       SQL
     end
 
@@ -147,10 +147,15 @@ class IncomeStatement::Totals
 
     # Returns SQL clause to exclude tax-advantaged accounts from budget calculations.
     # Tax-advantaged accounts (401k, IRA, HSA, etc.) are retirement savings, not daily expenses.
-    def exclude_tax_advantaged_sql
+    # Tax-advantaged accounts (401k, IRA, HSA, etc.) hold retirement savings, so their
+    # outflows — fees, withdrawals, realized gain/loss lines, internal reallocation — are
+    # not daily expenses and stay out of the statement. Inflows are a different matter: an
+    # employer payroll contribution or a dividend paid inside the account is money entering
+    # your finances from outside, and it is reported nowhere else, so it is let through.
+    def tax_advantaged_filter_sql
       ids = @family.tax_advantaged_account_ids
       return "" if ids.empty?
-      "AND a.id NOT IN (:tax_advantaged_account_ids)"
+      "AND (a.id NOT IN (:tax_advantaged_account_ids) OR ae.amount < 0)"
     end
 
     # Returns SQL clause to filter to only accounts included in the user's finances.

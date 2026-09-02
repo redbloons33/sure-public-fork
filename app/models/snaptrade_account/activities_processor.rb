@@ -13,6 +13,12 @@ class SnaptradeAccount::ActivitiesProcessor
     "TRANSFER_IN" => "Transfer",
     "TRANSFER_OUT" => "Transfer",
     "TRANSFER" => "Transfer",
+    "EXCHANGE" => "Exchange",           # Fund-to-fund exchange (internal reallocation)
+    "EXCHANGE_IN" => "Exchange",
+    "EXCHANGE_OUT" => "Exchange",
+    "EXCHANGEIN" => "Exchange",
+    "EXCHANGEOUT" => "Exchange",
+    "REALIZEDGAINLOSS" => "Other",      # Non-cash accounting line, not income/expense
     "INTEREST" => "Interest",
     "FEE" => "Fee",
     "TAX" => "Fee",
@@ -43,6 +49,15 @@ class SnaptradeAccount::ActivitiesProcessor
 
   # Activity types that result in Transaction records (cash movements)
   CASH_TYPES = %w[DIVIDEND DIV CONTRIBUTION WITHDRAWAL TRANSFER_IN TRANSFER_OUT TRANSFER INTEREST FEE TAX CASH].freeze
+
+  # Some brokerages (notably Fidelity workplace plans via SnapTrade) report payroll
+  # contributions and withdrawals under the generic "TRANSFER" type, distinguishing them
+  # only in the free-text description. Left as a bare "Transfer" they are labelled as an
+  # internal movement (kind: funds_movement) and dropped from every cash-flow report, and
+  # their sign is never normalized so inflows are recorded as outflows.
+  AMBIGUOUS_TRANSFER_TYPES = %w[TRANSFER TRANSFER_IN TRANSFER_OUT].freeze
+  CONTRIBUTION_DESCRIPTION = /\b(contrib|deferral)/i
+  WITHDRAWAL_DESCRIPTION = /\b(withdraw|distribution|disburse)/i
 
   def initialize(snaptrade_account)
     @snaptrade_account = snaptrade_account
@@ -197,7 +212,7 @@ class SnaptradeAccount::ActivitiesProcessor
         date: activity_date,
         name: description,
         source: "snaptrade",
-        activity_label: label_from_type(activity_type)
+        activity_label: label_from_type(activity_type, description)
       )
       @trades_count += 1 if result
     end
@@ -218,7 +233,8 @@ class SnaptradeAccount::ActivitiesProcessor
       description = data[:description] || data["description"] || build_description(activity_type, symbol)
 
       # Normalize amount sign for certain activity types
-      amount = normalize_cash_amount(amount, activity_type)
+      activity_label = label_from_type(activity_type, description)
+      amount = normalize_cash_amount(amount, activity_type, activity_label)
 
       # Extract currency - handle both nested object and string
       currency_data = data[:currency] || data["currency"]
@@ -239,7 +255,7 @@ class SnaptradeAccount::ActivitiesProcessor
         date: activity_date,
         name: description,
         source: "snaptrade",
-        investment_activity_label: label_from_type(activity_type)
+        investment_activity_label: activity_label
       )
       @transactions_count += 1 if result
     end
@@ -248,7 +264,16 @@ class SnaptradeAccount::ActivitiesProcessor
     # SnapTrade reports inflows and outflows as positive magnitudes per type, so we re-sign
     # them to match Plaid/Sure. Without this, dividends, interest, contributions, etc. get
     # classified as expenses on the income statement.
-    def normalize_cash_amount(amount, activity_type)
+    def normalize_cash_amount(amount, activity_type, label = nil)
+      # A generic TRANSFER resolved to Contribution/Withdrawal by description carries no
+      # reliable sign of its own, so key off the resolved label instead of the raw type.
+      if AMBIGUOUS_TRANSFER_TYPES.include?(activity_type&.upcase)
+        case label
+        when "Contribution" then return -amount.abs   # inflow
+        when "Withdrawal" then return amount.abs      # outflow
+        end
+      end
+
       case activity_type
       when "WITHDRAWAL", "TRANSFER_OUT", "FEE", "TAX"
         amount.abs    # outflow
@@ -268,8 +293,20 @@ class SnaptradeAccount::ActivitiesProcessor
       end
     end
 
-    def label_from_type(activity_type)
+    # Resolves the activity label, using the description to disambiguate generic
+    # TRANSFER rows that are really contributions or withdrawals. See
+    # AMBIGUOUS_TRANSFER_TYPES.
+    def label_from_type(activity_type, description = nil)
       normalized_type = activity_type&.upcase
+
+      if AMBIGUOUS_TRANSFER_TYPES.include?(normalized_type) && description.present?
+        # Withdrawal is checked first: its wording is the more decisive of the two.
+        case description
+        when WITHDRAWAL_DESCRIPTION then return "Withdrawal"
+        when CONTRIBUTION_DESCRIPTION then return "Contribution"
+        end
+      end
+
       label = SNAPTRADE_TYPE_TO_LABEL[normalized_type]
 
       if label.nil? && normalized_type.present?

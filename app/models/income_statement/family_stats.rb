@@ -48,10 +48,15 @@ class IncomeStatement::FamilyStats
       Transaction.pending_providers_sql("t")
     end
 
-    def exclude_tax_advantaged_sql
+    # Tax-advantaged accounts (401k, IRA, HSA, etc.) hold retirement savings, so their
+    # outflows — fees, withdrawals, realized gain/loss lines, internal reallocation — are
+    # not daily expenses and stay out of the statement. Inflows are a different matter: an
+    # employer payroll contribution or a dividend paid inside the account is money entering
+    # your finances from outside, and it is reported nowhere else, so it is let through.
+    def tax_advantaged_filter_sql
       ids = @family.tax_advantaged_account_ids
       return "" if ids.empty?
-      "AND a.id NOT IN (:tax_advantaged_account_ids)"
+      "AND (a.id NOT IN (:tax_advantaged_account_ids) OR ae.amount < 0)"
     end
 
     def scope_to_account_ids_sql
@@ -64,8 +69,8 @@ class IncomeStatement::FamilyStats
         WITH period_totals AS (
           SELECT
             date_trunc(:interval, ae.date) as period,
-            CASE WHEN t.kind IN ('investment_contribution', 'loan_payment') THEN 'expense' WHEN ae.amount < 0 THEN 'income' ELSE 'expense' END as classification,
-            SUM(CASE WHEN t.kind IN ('investment_contribution', 'loan_payment') THEN ABS(ae.amount * COALESCE(er.rate, 1)) ELSE ae.amount * COALESCE(er.rate, 1) END) as total
+            #{Transaction.income_classification_sql("t", "ae")} as classification,
+            SUM(#{Transaction.income_amount_sql("t", "ae")}) as total
           FROM transactions t
           JOIN entries ae ON ae.entryable_id = t.id AND ae.entryable_type = 'Transaction'
           JOIN accounts a ON a.id = ae.account_id
@@ -78,9 +83,9 @@ class IncomeStatement::FamilyStats
             AND t.kind NOT IN (#{budget_excluded_kinds_sql})
             AND ae.excluded = false
             #{pending_providers_sql}
-            #{exclude_tax_advantaged_sql}
+            #{tax_advantaged_filter_sql}
             #{scope_to_account_ids_sql}
-          GROUP BY period, CASE WHEN t.kind IN ('investment_contribution', 'loan_payment') THEN 'expense' WHEN ae.amount < 0 THEN 'income' ELSE 'expense' END
+          GROUP BY period, #{Transaction.income_classification_sql("t", "ae")}
         )
         SELECT
           classification,
