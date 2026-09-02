@@ -55,7 +55,7 @@ class Transaction::Search
   # outflow, which is what the summary bar shows when a filter selects only transfers.
   def totals
     @totals ||= begin
-      Rails.cache.fetch("transaction_search_totals/v3/#{cache_key_base}") do
+      Rails.cache.fetch("transaction_search_totals/v4/#{cache_key_base}") do
         eligible = Transaction.budget_eligible_sql(
           txn_alias: "transactions",
           entry_alias: "entries",
@@ -123,45 +123,52 @@ class Transaction::Search
     def apply_category_filter(query, categories)
       return query unless categories.present?
 
-      # Check for "Uncategorized" in any supported locale (handles URL params in different languages)
+      # Both synthetic categories are matched by name in any supported locale, so a URL built
+      # in one language still filters correctly.
       all_uncategorized_names = Category.all_uncategorized_names
+      all_other_investments_names = Category.all_other_investments_names
       include_uncategorized = (categories & all_uncategorized_names).any?
-      real_categories = categories - all_uncategorized_names
+      include_other_investments = (categories & all_other_investments_names).any?
+      real_categories = categories - all_uncategorized_names - all_other_investments_names
 
       # Get parent category IDs for the given category names
       parent_category_ids = family.categories.where(name: real_categories).pluck(:id)
 
-      # Investment transactions with an activity label (Dividend, Interest, Fee, etc.) are
-      # effectively categorized by that label - the UI shows it in place of a category - so they
-      # must not be surfaced by the "Uncategorized" filter. Investment transactions with no label
-      # are still genuinely uncategorized and remain included.
-      uncategorized_condition = "categories.id IS NULL AND transactions.kind NOT IN (?) AND NULLIF(transactions.investment_activity_label, '') IS NULL"
+      # A row with no category splits two ways, exactly as the income statement buckets it:
+      # if it shows an investment activity label (Dividend, Interest, Fee, ...) the UI is
+      # displaying that in place of a category, so it belongs to Other Investments; otherwise
+      # it is genuinely Uncategorized. Kinds the statement never counts are left out of both
+      # so the two figures and the rows behind them stay in step.
+      no_real_category = "categories.id IS NULL AND transactions.kind NOT IN (?)"
+      uncategorized_condition = "#{no_real_category} AND NOT (#{Transaction.shows_activity_label_sql('transactions')})"
+      other_investments_condition = "#{no_real_category} AND #{Transaction.shows_activity_label_sql('transactions')}"
 
-      # Build condition based on whether parent_category_ids is empty
-      if parent_category_ids.empty?
-        if include_uncategorized
-          query = query.left_joins(:category).where(
-            "categories.name IN (?) OR (#{uncategorized_condition})",
-            real_categories.presence || [], Transaction::TRANSFER_KINDS
-          )
-        else
-          query = query.left_joins(:category).where(categories: { name: real_categories })
-        end
-      else
-        if include_uncategorized
-          query = query.left_joins(:category).where(
-            "categories.name IN (?) OR categories.parent_id IN (?) OR (#{uncategorized_condition})",
-            real_categories, parent_category_ids, Transaction::TRANSFER_KINDS
-          )
-        else
-          query = query.left_joins(:category).where(
-            "categories.name IN (?) OR categories.parent_id IN (?)",
-            real_categories, parent_category_ids
-          )
-        end
+      clauses = []
+      binds = []
+
+      if real_categories.any?
+        clauses << "categories.name IN (?)"
+        binds << real_categories
       end
 
-      query
+      if parent_category_ids.any?
+        clauses << "categories.parent_id IN (?)"
+        binds << parent_category_ids
+      end
+
+      if include_uncategorized
+        clauses << "(#{uncategorized_condition})"
+        binds << Transaction::BUDGET_EXCLUDED_KINDS
+      end
+
+      if include_other_investments
+        clauses << "(#{other_investments_condition})"
+        binds << Transaction::BUDGET_EXCLUDED_KINDS
+      end
+
+      return query if clauses.empty?
+
+      query.left_joins(:category).where(clauses.join(" OR "), *binds)
     end
 
     def apply_type_filter(query, types)

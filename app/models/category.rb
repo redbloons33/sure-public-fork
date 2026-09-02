@@ -181,6 +181,14 @@ class Category < ApplicationRecord
       I18n.t(OTHER_INVESTMENTS_NAME_KEY)
     end
 
+    # Returns all possible other-investments names across all supported locales, so the
+    # category filter recognises it regardless of the language the URL was built in.
+    def all_other_investments_names
+      LanguagesHelper::SUPPORTED_LOCALES.map do |locale|
+        I18n.t(OTHER_INVESTMENTS_NAME_KEY, locale: locale)
+      end.uniq
+    end
+
     # Helper to get the localized name for investment contributions
     def investment_contributions_name
       I18n.t(INVESTMENT_CONTRIBUTIONS_NAME_KEY)

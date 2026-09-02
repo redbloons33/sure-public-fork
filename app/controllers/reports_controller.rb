@@ -393,7 +393,7 @@ class ReportsController < ApplicationController
       end
 
       # Helper to process a transaction into its category group
-      process_entry = ->(category, entry, kind) do
+      process_entry = ->(category, entry, kind, activity_label) do
         # Same classification the income statement uses: a loan_payment is an expense on
         # either side of the ledger, so sign alone would file it under Income.
         type = if Transaction::ALWAYS_EXPENSE_KINDS.include?(kind)
@@ -408,8 +408,13 @@ class ReportsController < ApplicationController
         end
 
         if category.nil?
-          parent_key = [ :uncategorized, type ]
-          grouped_data[parent_key] ||= init_category_group.call(:uncategorized, Category.uncategorized.name, Category.uncategorized.color, Category.uncategorized.lucide_icon, type)
+          # A row with no category that shows an investment activity label instead is
+          # investment activity, not "Uncategorized" — the same split the income statement
+          # and the category filter make, so this row's total and its link agree.
+          synthetic = activity_label.present? ? Category.other_investments : Category.uncategorized
+          key = activity_label.present? ? :other_investments : :uncategorized
+          parent_key = [ key, type ]
+          grouped_data[parent_key] ||= init_category_group.call(key, synthetic.name, synthetic.color, synthetic.lucide_icon, type)
         elsif category.parent_id.present?
           # This is a subcategory - group under parent
           parent = category.parent
@@ -431,7 +436,7 @@ class ReportsController < ApplicationController
       end
 
       transactions.each do |transaction|
-        process_entry.call(transaction.category, transaction.entry, transaction.kind)
+        process_entry.call(transaction.category, transaction.entry, transaction.kind, transaction.investment_activity_label)
       end
 
       # Convert to array and sort subcategories

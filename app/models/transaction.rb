@@ -156,6 +156,16 @@ class Transaction < ApplicationRecord
     INTERNAL_MOVEMENT_LABELS.map { |l| "'#{l}'" }.join(", ")
   end
 
+  # SQL: does this row show an investment activity label where a category would go?
+  #
+  # The transactions list renders the label (Dividend, Interest, Fee, ...) in place of a
+  # category, so a row with no category but with a label is not "Uncategorized" — it is
+  # investment activity. The income statement, the activity breakdown and the category
+  # filter all bucket these the same way, under the synthetic Other Investments category.
+  def self.shows_activity_label_sql(txn_alias = "t")
+    "NULLIF(#{txn_alias}.investment_activity_label, '') IS NOT NULL"
+  end
+
   # SQL: the single definition of "does this row belong in income/expense totals?".
   #
   # Both the Reports tab (IncomeStatement::Totals) and the Transactions tab summary bar

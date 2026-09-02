@@ -63,7 +63,7 @@ class IncomeStatement::Totals
           #{Transaction.income_classification_sql("at", "ae")} as classification,
           ABS(SUM(#{Transaction.income_amount_sql("at", "ae")})) as total,
           COUNT(ae.id) as transactions_count,
-          false as is_uncategorized_investment
+          #{uncategorized_investment_sql} as is_uncategorized_investment
         FROM (#{@transactions_scope.to_sql}) at
         JOIN entries ae ON ae.entryable_id = at.id AND ae.entryable_type = 'Transaction'
         JOIN accounts a ON a.id = ae.account_id
@@ -77,7 +77,7 @@ class IncomeStatement::Totals
           AND a.family_id = :family_id
           AND a.status IN ('draft', 'active')
           #{include_finance_accounts_sql}
-        GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")};
+        GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")}, #{uncategorized_investment_sql};
       SQL
     end
 
@@ -89,7 +89,7 @@ class IncomeStatement::Totals
           #{Transaction.income_classification_sql("at", "ae")} as classification,
           ABS(SUM(#{Transaction.income_amount_sql("at", "ae")})) as total,
           COUNT(ae.id) as entry_count,
-          false as is_uncategorized_investment
+          #{uncategorized_investment_sql} as is_uncategorized_investment
         FROM (#{@transactions_scope.to_sql}) at
         JOIN entries ae ON ae.entryable_id = at.id AND ae.entryable_type = 'Transaction'
         JOIN accounts a ON a.id = ae.account_id
@@ -103,7 +103,7 @@ class IncomeStatement::Totals
           AND a.family_id = :family_id
           AND a.status IN ('draft', 'active')
           #{include_finance_accounts_sql}
-        GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")}
+        GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")}, #{uncategorized_investment_sql}
       SQL
     end
 
@@ -131,6 +131,13 @@ class IncomeStatement::Totals
       params[:included_account_ids] = @included_account_ids if @included_account_ids
 
       params
+    end
+
+    # A row with no category that shows an investment activity label instead belongs under
+    # Other Investments, not Uncategorized — matching what the category filter selects, so
+    # the Uncategorized figure and the transactions it links to hold the same rows.
+    def uncategorized_investment_sql
+      "(at.category_id IS NULL AND #{Transaction.shows_activity_label_sql('at')})"
     end
 
     # The shared income/expense eligibility rule — see Transaction.budget_eligible_sql.
