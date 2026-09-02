@@ -133,6 +133,25 @@ class Transaction < ApplicationRecord
     BUDGET_EXCLUDED_KINDS.map { |k| "'#{k}'" }.join(", ")
   end
 
+  # SQL: does this row read as income (or as an expense) to the income statement?
+  #
+  # This is the classification half of the rule only — it answers "what kind of thing is
+  # this row", not "does it count", which is budget_eligible_sql. The Transactions tab type
+  # filter uses this so that filtering to Expense selects the same rows the expense total is
+  # built from. Sign alone is not enough: a loan_payment is an expense on either side of the
+  # ledger, and the kinds that just move money between tracked accounts are neither.
+  def self.budget_classified_sql(classification, txn_alias: "transactions", entry_alias: "entries")
+    classification = classification.to_s
+    unless %w[income expense].include?(classification)
+      raise ArgumentError, "classification must be 'income' or 'expense', got #{classification.inspect}"
+    end
+
+    <<~SQL.squish
+      #{txn_alias}.kind NOT IN (#{budget_excluded_kinds_sql})
+        AND (#{income_classification_sql(txn_alias, entry_alias)}) = '#{classification}'
+    SQL
+  end
+
   def self.internal_movement_labels_sql
     INTERNAL_MOVEMENT_LABELS.map { |l| "'#{l}'" }.join(", ")
   end

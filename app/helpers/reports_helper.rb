@@ -5,12 +5,29 @@ module ReportsHelper
   # Supplying query params suppresses TransactionsController#store_params!'s restore
   # branch, so an omitted per_page would both shrink the list to the pagination default
   # of 10 and overwrite their stored preference on the way through.
-  def month_transactions_path(trend)
-    transactions_path(
-      page: 1,
-      per_page: stored_transactions_per_page,
-      q: { start_date: trend[:start_date].to_s, end_date: trend[:end_date].to_s }
-    )
+  def month_transactions_path(trend, type: nil)
+    filtered_transactions_path(trend[:start_date], trend[:end_date], type: type)
+  end
+
+  # Path from a breakdown row to the transactions behind it: same period, same side of the
+  # statement, narrowed to that category. A parent category's filter also picks up its
+  # subcategories, which is what the row's own total already includes.
+  def category_transactions_path(item, type:, start_date:, end_date:)
+    filtered_transactions_path(start_date, end_date, type: type, categories: [ item[:category_name] ])
+  end
+
+  # Trades are not Transactions, so the "Other Investments" row has nothing to show on the
+  # transactions page. Leave it unlinked rather than send the user to an empty list.
+  def breakdown_row_linkable?(item)
+    item[:category_id] != :other_investments
+  end
+
+  def filtered_transactions_path(start_date, end_date, type: nil, categories: nil)
+    q = { start_date: start_date.to_s, end_date: end_date.to_s }
+    q[:types] = [ type.to_s ] if type.present?
+    q[:categories] = categories if categories.present?
+
+    transactions_path(page: 1, per_page: stored_transactions_per_page, q: q)
   end
 
   def stored_transactions_per_page

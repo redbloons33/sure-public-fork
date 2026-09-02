@@ -33,10 +33,16 @@
                     <% end %>
                   </td>
                   <td class="py-3 px-4 lg:px-6 text-right privacy-sensitive">
-                    <%= Money.new(trend[:income], Current.family.currency).format %>
+                    <%= link_to Money.new(trend[:income], Current.family.currency).format,
+                          month_transactions_path(trend, type: :income),
+                          class: "hover:underline",
+                          title: t("reports.trends.view_income", month: trend[:month]) %>
                   </td>
                   <td class="py-3 px-4 lg:px-6 text-right privacy-sensitive">
-                    <%= Money.new(trend[:expenses], Current.family.currency).format %>
+                    <%= link_to Money.new(trend[:expenses], Current.family.currency).format,
+                          month_transactions_path(trend, type: :expense),
+                          class: "hover:underline",
+                          title: t("reports.trends.view_expenses", month: trend[:month]) %>
                   </td>
                   <td class="py-3 px-4 lg:px-6 text-right privacy-sensitive <%= trend[:net] >= 0 ? "text-success" : "text-destructive" %>">
                     <%= Money.new(trend[:net], Current.family.currency).format %>

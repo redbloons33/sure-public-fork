@@ -172,15 +172,21 @@ class Transaction::Search
       when [ "transfer" ]
         query.where(kind: Transaction::TRANSFER_KINDS)
       when [ "expense" ]
-        query.where("entries.amount >= 0").where.not(kind: Transaction::TRANSFER_KINDS)
+        query.where(Transaction.budget_classified_sql("expense"))
       when [ "income" ]
-        query.where("entries.amount < 0").where.not(kind: Transaction::TRANSFER_KINDS)
+        query.where(Transaction.budget_classified_sql("income"))
       when [ "expense", "transfer" ]
-        query.where("entries.amount >= 0 OR transactions.kind IN (?)", Transaction::TRANSFER_KINDS)
+        query.where(
+          "(#{Transaction.budget_classified_sql('expense')}) OR transactions.kind IN (?)",
+          Transaction::TRANSFER_KINDS
+        )
       when [ "income", "transfer" ]
-        query.where("entries.amount < 0 OR transactions.kind IN (?)", Transaction::TRANSFER_KINDS)
+        query.where(
+          "(#{Transaction.budget_classified_sql('income')}) OR transactions.kind IN (?)",
+          Transaction::TRANSFER_KINDS
+        )
       when [ "expense", "income" ]
-        query.where.not(kind: Transaction::TRANSFER_KINDS)
+        query.where.not(kind: Transaction::BUDGET_EXCLUDED_KINDS)
       else
         query
       end
