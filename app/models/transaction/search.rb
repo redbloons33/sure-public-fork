@@ -131,10 +131,11 @@ class Transaction::Search
       # Get parent category IDs for the given category names
       parent_category_ids = family.categories.where(name: real_categories).pluck(:id)
 
-      # Investment-account transactions (dividends, interest, fees, etc.) are never assigned a
-      # category in the UI - they show an investment activity label instead - so they must not
-      # be surfaced by the "Uncategorized" filter.
-      uncategorized_condition = "categories.id IS NULL AND transactions.kind NOT IN (?) AND accounts.accountable_type != 'Investment'"
+      # Investment transactions with an activity label (Dividend, Interest, Fee, etc.) are
+      # effectively categorized by that label - the UI shows it in place of a category - so they
+      # must not be surfaced by the "Uncategorized" filter. Investment transactions with no label
+      # are still genuinely uncategorized and remain included.
+      uncategorized_condition = "categories.id IS NULL AND transactions.kind NOT IN (?) AND NULLIF(transactions.investment_activity_label, '') IS NULL"
 
       # Build condition based on whether parent_category_ids is empty
       if parent_category_ids.empty?
