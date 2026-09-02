@@ -125,7 +125,8 @@ class TransactionsController < ApplicationController
         flash[:cta] = {
           type: "category_rule",
           category_id: transaction.category_id,
-          category_name: transaction.category.name
+          category_name: transaction.category.name,
+          merchant_name: @entry.name
         }
       end
 
@@ -421,13 +422,7 @@ class TransactionsController < ApplicationController
     def needs_rule_notification?(transaction)
       return false if Current.user.rule_prompts_disabled
 
-      if Current.user.rule_prompt_dismissed_at.present?
-        time_since_last_rule_prompt = Time.current - Current.user.rule_prompt_dismissed_at
-        return false if time_since_last_rule_prompt < 1.day
-      end
-
-      transaction.saved_change_to_category_id? && transaction.category_id.present? &&
-      transaction.eligible_for_category_rule?
+      transaction.saved_change_to_category_id? && transaction.category_id.present?
     end
 
     def entry_params
