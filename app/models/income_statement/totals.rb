@@ -73,11 +73,9 @@ class IncomeStatement::Totals
           er.from_currency = ae.currency AND
           er.to_currency = :target_currency
         )
-        WHERE at.kind NOT IN (#{budget_excluded_kinds_sql})
-          AND ae.excluded = false
+        WHERE #{budget_eligible_sql}
           AND a.family_id = :family_id
           AND a.status IN ('draft', 'active')
-          #{tax_advantaged_filter_sql}
           #{include_finance_accounts_sql}
         GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")};
       SQL
@@ -101,15 +99,9 @@ class IncomeStatement::Totals
           er.from_currency = ae.currency AND
           er.to_currency = :target_currency
         )
-        WHERE at.kind NOT IN (#{budget_excluded_kinds_sql})
-          AND (
-            at.investment_activity_label IS NULL
-            OR at.investment_activity_label NOT IN ('Transfer', 'Sweep In', 'Sweep Out', 'Exchange')
-          )
-          AND ae.excluded = false
+        WHERE #{budget_eligible_sql}
           AND a.family_id = :family_id
           AND a.status IN ('draft', 'active')
-          #{tax_advantaged_filter_sql}
           #{include_finance_accounts_sql}
         GROUP BY c.id, c.parent_id, #{Transaction.income_classification_sql("at", "ae")}
       SQL
@@ -135,37 +127,28 @@ class IncomeStatement::Totals
         end_date: @date_range.end
       }
 
-      # Add tax-advantaged account IDs if any exist
-      ids = @family.tax_advantaged_account_ids
-      params[:tax_advantaged_account_ids] = ids if ids.present?
-
       # Add included account IDs for per-user finance scoping
       params[:included_account_ids] = @included_account_ids if @included_account_ids
 
       params
     end
 
-    # Returns SQL clause to exclude tax-advantaged accounts from budget calculations.
-    # Tax-advantaged accounts (401k, IRA, HSA, etc.) are retirement savings, not daily expenses.
-    # Tax-advantaged accounts (401k, IRA, HSA, etc.) hold retirement savings, so their
-    # outflows — fees, withdrawals, realized gain/loss lines, internal reallocation — are
-    # not daily expenses and stay out of the statement. Inflows are a different matter: an
-    # employer payroll contribution or a dividend paid inside the account is money entering
-    # your finances from outside, and it is reported nowhere else, so it is let through.
-    def tax_advantaged_filter_sql
-      ids = @family.tax_advantaged_account_ids
-      return "" if ids.empty?
-      "AND (a.id NOT IN (:tax_advantaged_account_ids) OR ae.amount < 0)"
+    # The shared income/expense eligibility rule — see Transaction.budget_eligible_sql.
+    # The Transactions tab summary bar uses the same method, which is what keeps the two
+    # views from disagreeing about what counts as income or an expense.
+    def budget_eligible_sql
+      Transaction.budget_eligible_sql(
+        txn_alias: "at",
+        entry_alias: "ae",
+        account_alias: "a",
+        tax_advantaged_account_ids: @family.tax_advantaged_account_ids
+      )
     end
 
     # Returns SQL clause to filter to only accounts included in the user's finances.
     def include_finance_accounts_sql
       return "" if @included_account_ids.nil?
       "AND a.id IN (:included_account_ids)"
-    end
-
-    def budget_excluded_kinds_sql
-      @budget_excluded_kinds_sql ||= Transaction::BUDGET_EXCLUDED_KINDS.map { |k| "'#{k}'" }.join(", ")
     end
 
     def validate_date_range!

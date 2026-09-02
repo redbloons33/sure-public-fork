@@ -159,7 +159,13 @@ class Account::ProviderImportAdapter
       if Transaction::INTERNAL_MOVEMENT_LABELS.include?(detected_label)
         auto_kind = "funds_movement"
       elsif detected_label == "Contribution"
-        auto_kind = "investment_contribution"
+        # A provider labels every deposit into a retirement account a "Contribution",
+        # whether the money came from an account you track or straight from an employer's
+        # payroll. Only the first is a transfer, and we cannot tell which this is yet — the
+        # counterparty may not even be imported. So leave the kind alone: the transfer
+        # matcher sets investment_contribution once it finds a real other side, and anything
+        # still unmatched stays `standard` and classifies as income by its sign, which is
+        # correct for an employer contribution.
         auto_category = account.family.investment_contributions_category
       elsif looks_like_reinvestment?(name)
         auto_kind = "funds_movement"

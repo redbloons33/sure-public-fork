@@ -34,29 +34,17 @@ class IncomeStatement::FamilyStats
         family_id: @family.id
       }
 
-      ids = @family.tax_advantaged_account_ids
-      params[:tax_advantaged_account_ids] = ids if ids.present?
-
       params
     end
 
-    def budget_excluded_kinds_sql
-      @budget_excluded_kinds_sql ||= Transaction::BUDGET_EXCLUDED_KINDS.map { |k| "'#{k}'" }.join(", ")
-    end
-
-    def pending_providers_sql
-      Transaction.pending_providers_sql("t")
-    end
-
-    # Tax-advantaged accounts (401k, IRA, HSA, etc.) hold retirement savings, so their
-    # outflows — fees, withdrawals, realized gain/loss lines, internal reallocation — are
-    # not daily expenses and stay out of the statement. Inflows are a different matter: an
-    # employer payroll contribution or a dividend paid inside the account is money entering
-    # your finances from outside, and it is reported nowhere else, so it is let through.
-    def tax_advantaged_filter_sql
-      ids = @family.tax_advantaged_account_ids
-      return "" if ids.empty?
-      "AND (a.id NOT IN (:tax_advantaged_account_ids) OR ae.amount < 0)"
+    # Same eligibility rule as the statement itself — see Transaction.budget_eligible_sql.
+    def budget_eligible_sql
+      Transaction.budget_eligible_sql(
+        txn_alias: "t",
+        entry_alias: "ae",
+        account_alias: "a",
+        tax_advantaged_account_ids: @family.tax_advantaged_account_ids
+      )
     end
 
     def scope_to_account_ids_sql
@@ -80,10 +68,7 @@ class IncomeStatement::FamilyStats
             er.to_currency = :target_currency
           )
           WHERE a.family_id = :family_id
-            AND t.kind NOT IN (#{budget_excluded_kinds_sql})
-            AND ae.excluded = false
-            #{pending_providers_sql}
-            #{tax_advantaged_filter_sql}
+            AND #{budget_eligible_sql}
             #{scope_to_account_ids_sql}
           GROUP BY period, #{Transaction.income_classification_sql("t", "ae")}
         )

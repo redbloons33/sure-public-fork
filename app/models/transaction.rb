@@ -79,22 +79,26 @@ class Transaction < ApplicationRecord
   TRANSFER_KINDS = %w[funds_movement cc_payment loan_payment investment_contribution].freeze
 
   # Kinds excluded from budget/income-statement analytics.
-  # loan_payment and investment_contribution are intentionally NOT here — they are real
-  # cash movement that belongs in the statement. How each is classified once included is
-  # decided by ALWAYS_EXPENSE_KINDS below.
-  BUDGET_EXCLUDED_KINDS = %w[funds_movement one_time cc_payment].freeze
+  # Every kind that just shuffles money between accounts you already track belongs here:
+  # the money never entered or left your finances, so counting it would double-book the
+  # cash that funded it. investment_contribution is one of these — moving savings into a
+  # brokerage is a transfer, not an expense.
+  #
+  # loan_payment is intentionally NOT here. Paying down debt does leave your finances, and
+  # ALWAYS_EXPENSE_KINDS below decides how it is classified once included.
+  BUDGET_EXCLUDED_KINDS = %w[funds_movement one_time cc_payment investment_contribution].freeze
 
   # Kinds that count as an expense no matter which side of the ledger they sit on.
   #
-  # A matched transfer always books the funding side (positive/outflow) as the
-  # investment_contribution or loan_payment, and the receiving side as funds_movement — see
-  # Transfer.kind_for_account. So an investment_contribution can be classified by its sign
-  # like any other row: positive means cash left a tracked account for savings (an expense),
-  # while negative means the contribution arrived from outside the tracked accounts entirely
-  # — an employer payroll or match contribution — which is real income.
+  # loan_payment is here because a provider can import the debt-reducing side of a payment
+  # directly onto a Loan account as a negative amount. Sign alone would read that as income;
+  # it is money you spent either way.
   #
-  # loan_payment stays here because a provider can import a negative (debt-reducing) payment
-  # directly onto a Loan account, which is still money you spent.
+  # Money arriving in an investment account from outside your tracked accounts — an employer
+  # payroll or match contribution — is NOT a transfer and must never be given a transfer
+  # kind. It stays `standard` and classifies as income by its sign, like any paycheck.
+  # A transfer kind is assigned only once a real counterparty is matched, and then it is
+  # excluded from the statement entirely via BUDGET_EXCLUDED_KINDS.
   ALWAYS_EXPENSE_KINDS = %w[loan_payment].freeze
 
   # SQL: income-statement classification for a transaction row.
@@ -123,6 +127,46 @@ class Transaction < ApplicationRecord
 
   def self.always_expense_kinds_sql
     ALWAYS_EXPENSE_KINDS.map { |k| "'#{k}'" }.join(", ")
+  end
+
+  def self.budget_excluded_kinds_sql
+    BUDGET_EXCLUDED_KINDS.map { |k| "'#{k}'" }.join(", ")
+  end
+
+  def self.internal_movement_labels_sql
+    INTERNAL_MOVEMENT_LABELS.map { |l| "'#{l}'" }.join(", ")
+  end
+
+  # SQL: the single definition of "does this row belong in income/expense totals?".
+  #
+  # Both the Reports tab (IncomeStatement::Totals) and the Transactions tab summary bar
+  # (Transaction::Search#totals) call this, so the two views cannot disagree about what
+  # counts. Anything that only shuffles money between accounts you already track is out;
+  # so are excluded entries, still-pending provider rows, and internal investment plumbing.
+  #
+  # Tax-advantaged accounts are asymmetric on purpose: their outflows (fees, withdrawals,
+  # internal reallocation) are not daily expenses, but their inflows — an employer payroll
+  # contribution or a dividend paid inside the account — are money entering your finances
+  # from outside and are reported nowhere else, so they are let through as income.
+  def self.budget_eligible_sql(txn_alias: "t", entry_alias: "ae", account_alias: "a", tax_advantaged_account_ids: [])
+    clauses = [
+      "#{txn_alias}.kind NOT IN (#{budget_excluded_kinds_sql})",
+      "(#{txn_alias}.investment_activity_label IS NULL OR #{txn_alias}.investment_activity_label NOT IN (#{internal_movement_labels_sql}))",
+      "#{entry_alias}.excluded = false"
+    ]
+
+    PENDING_PROVIDERS.each do |provider|
+      clauses << "(#{txn_alias}.extra -> '#{provider}' ->> 'pending')::boolean IS DISTINCT FROM true"
+    end
+
+    if tax_advantaged_account_ids.present?
+      clauses << sanitize_sql_array([
+        "(#{account_alias}.id NOT IN (?) OR #{entry_alias}.amount < 0)",
+        tax_advantaged_account_ids
+      ])
+    end
+
+    clauses.join(" AND ")
   end
 
   # All valid investment activity labels (for UI dropdown)

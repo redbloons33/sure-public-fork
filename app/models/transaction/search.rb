@@ -47,28 +47,28 @@ class Transaction::Search
     end
   end
 
-  # Computes totals for the specific search
-  # Note: Excludes tax-advantaged accounts (401k, IRA, etc.) from totals calculation
-  # because those transactions are retirement savings, not daily income/expenses.
+  # Computes totals for the specific search.
+  #
+  # Income and expense use Transaction.budget_eligible_sql — the same rule the Reports tab
+  # applies — so the summary bar here and the income statement there always agree. Rows the
+  # rule rejects are not lost: transfer kinds are surfaced separately as transfer inflow and
+  # outflow, which is what the summary bar shows when a filter selects only transfers.
   def totals
     @totals ||= begin
-      Rails.cache.fetch("transaction_search_totals/v2/#{cache_key_base}") do
-        scope = transactions_scope
+      Rails.cache.fetch("transaction_search_totals/v3/#{cache_key_base}") do
+        eligible = Transaction.budget_eligible_sql(
+          txn_alias: "transactions",
+          entry_alias: "entries",
+          account_alias: "accounts",
+          tax_advantaged_account_ids: family.tax_advantaged_account_ids
+        )
+        classification = Transaction.income_classification_sql("transactions", "entries")
+        amount = Transaction.income_amount_sql("transactions", "entries")
 
-        # Exclude tax-advantaged accounts from totals calculation
-        tax_advantaged_ids = family.tax_advantaged_account_ids
-        scope = scope.where.not(accounts: { id: tax_advantaged_ids }) if tax_advantaged_ids.present?
-
-        result = scope
+        result = transactions_scope
                   .select(
-                    ActiveRecord::Base.sanitize_sql_array([
-                      "COALESCE(SUM(CASE WHEN entries.amount >= 0 AND transactions.kind NOT IN (?) THEN ABS(entries.amount * COALESCE(er.rate, 1)) ELSE 0 END), 0) as expense_total",
-                      Transaction::TRANSFER_KINDS
-                    ]),
-                    ActiveRecord::Base.sanitize_sql_array([
-                      "COALESCE(SUM(CASE WHEN entries.amount < 0 AND transactions.kind NOT IN (?) THEN ABS(entries.amount * COALESCE(er.rate, 1)) ELSE 0 END), 0) as income_total",
-                      Transaction::TRANSFER_KINDS
-                    ]),
+                    "COALESCE(SUM(CASE WHEN (#{eligible}) AND (#{classification}) = 'expense' THEN ABS(#{amount}) ELSE 0 END), 0) as expense_total",
+                    "COALESCE(SUM(CASE WHEN (#{eligible}) AND (#{classification}) = 'income' THEN ABS(#{amount}) ELSE 0 END), 0) as income_total",
                     ActiveRecord::Base.sanitize_sql_array([
                       "COALESCE(SUM(CASE WHEN entries.amount < 0 AND transactions.kind IN (?) THEN ABS(entries.amount * COALESCE(er.rate, 1)) ELSE 0 END), 0) as transfer_inflow_total",
                       Transaction::TRANSFER_KINDS
